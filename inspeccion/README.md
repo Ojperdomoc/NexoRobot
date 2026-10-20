@@ -47,7 +47,7 @@ inspeccion/
 │   ├── nexo-solder.json  clases, strides, normalización, tamaño de entrada
 │   └── metrics.json      métricas de validación
 ├── muestras/             fotos de ejemplo + etiquetas de verdad (gt/)
-└── vendor/               ort.min.js, ort-wasm-simd-threaded.wasm, jspdf
+└── vendor/               ONNX Runtime Web 1.22 (build WASM) + jsPDF, sin CDN
 ```
 
 Todo se ejecuta en el cliente: **ninguna imagen se envía a un servidor** y no

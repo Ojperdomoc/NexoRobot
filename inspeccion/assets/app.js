@@ -128,7 +128,7 @@ async function initModel() {
   setModelStatus('loading', 'Cargando modelo…');
   try {
     const ort = await waitForOrt();
-    if (!ort) throw new Error('No se cargó ONNX Runtime (revisa vendor/ort.min.js)');
+    if (!ort) throw new Error('No se cargó ONNX Runtime (revisa vendor/ort.wasm.min.js)');
     const url = new URL('modelos/nexo-solder.onnx', document.baseURI).href;
     const metaUrl = new URL('modelos/nexo-solder.json', document.baseURI).href;
     const detector = await SolderDetector.load({

@@ -35,11 +35,16 @@ export class SolderDetector {
    */
   static async load({ modelUrl, metaUrl, wasmPaths, threads }) {
     const ort = window.ort;
-    if (!ort) throw new Error('ONNX Runtime no está disponible (¿falta vendor/ort.min.js?)');
+    if (!ort) throw new Error('ONNX Runtime no está disponible (¿falta vendor/ort.wasm.min.js?)');
     if (wasmPaths && ort.env?.wasm) ort.env.wasm.wasmPaths = wasmPaths;
     if (ort.env?.wasm) {
+      // Los hilos de WASM requieren SharedArrayBuffer, que solo existe en
+      // páginas aisladas (COOP/COEP). Fuera de ese caso se usa 1 hilo para
+      // no provocar un error de inicialización seguido de reintento.
+      const isolated = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
       const hw = navigator.hardwareConcurrency || 2;
-      ort.env.wasm.numThreads = Math.max(1, Math.min(threads || 4, Math.floor(hw / 2)));
+      const wanted = isolated ? Math.floor(hw / 2) : 1;
+      ort.env.wasm.numThreads = Math.max(1, Math.min(threads || 4, wanted));
       ort.env.wasm.simd = true;
       ort.env.wasm.proxy = false;
       ort.env.logLevel = 'error';
