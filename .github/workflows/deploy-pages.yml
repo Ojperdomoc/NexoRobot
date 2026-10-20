@@ -35,6 +35,14 @@ jobs:
           cp Nexo.html _site/Nexo.html
           cp .nojekyll _site/.nojekyll
 
+      - name: Assemble solder inspection app
+        run: |
+          cp -R inspeccion _site/inspeccion
+          # el modelo ONNX y los binarios de ONNX Runtime se publican tal cual
+          test -f _site/inspeccion/modelos/nexo-solder.onnx
+          test -f _site/inspeccion/vendor/ort-wasm-simd-threaded.wasm
+          du -sh _site/inspeccion
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

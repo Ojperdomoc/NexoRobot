@@ -4552,5 +4552,37 @@ THE SOFTWARE.
         <button onclick="location.reload()">Volver a intentar</button>
       </div>
     </div>
+    <a class="nexo-inspect-link" href="./inspeccion/" title="Inspección de soldadura de PCB con IA">
+      <span aria-hidden="true">▣</span> Inspección de soldadura
+    </a>
+    <style>
+      .nexo-inspect-link {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 2147483000;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 15px;
+        border-radius: 999px;
+        background: rgba(10, 22, 25, 0.86);
+        border: 1px solid rgba(111, 227, 182, 0.4);
+        color: #b7f2da;
+        font: 600 13px/1 'Inter', system-ui, sans-serif;
+        text-decoration: none;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+        transition: transform 0.15s ease, border-color 0.15s ease;
+      }
+      .nexo-inspect-link:hover {
+        transform: translateY(-2px);
+        border-color: #6fe3b6;
+        text-decoration: none;
+      }
+      @media (max-width: 560px) {
+        .nexo-inspect-link { right: 12px; bottom: 12px; padding: 9px 12px; font-size: 12px; }
+      }
+    </style>
   </body>
 </html>

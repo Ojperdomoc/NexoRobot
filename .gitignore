@@ -1,0 +1,14 @@
+# ── entrenamiento: datos sintéticos y artefactos pesados ──────────────
+training/data/
+*.pt
+*.pth
+*.ckpt
+!inspeccion/modelos/*.onnx
+__pycache__/
+*.pyc
+.venv/
+*.log
+
+# ── sistema ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

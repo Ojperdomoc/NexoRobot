@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a1417" />
+    <title>Nexo · Inspección de soldadura con IA</title>
+    <meta
+      name="description"
+      content="Inspección visual de soldadura en PCB con YOLO en el navegador: cajas verdes, naranjas y rojas según IPC-A-610G, captura de foto e informe PDF con recomendaciones."
+    />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a1417'/%3E%3Crect x='14' y='20' width='36' height='24' rx='4' fill='none' stroke='%236fe3b6' stroke-width='3'/%3E%3Ccircle cx='22' cy='44' r='3' fill='%2322c55e'/%3E%3Ccircle cx='32' cy='44' r='3' fill='%23f59e0b'/%3E%3Ccircle cx='42' cy='44' r='3' fill='%23ef4444'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="assets/app.css" />
+    <script src="vendor/ort.min.js" defer></script>
+    <script src="vendor/jspdf.umd.min.js" defer></script>
+    <script type="module" src="assets/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../" title="Volver a Nexo">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="26" height="26">
+            <rect x="3" y="8" width="26" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2" />
+            <circle cx="10" cy="22" r="2.1" fill="#22c55e" />
+            <circle cx="16" cy="22" r="2.1" fill="#f59e0b" />
+            <circle cx="22" cy="22" r="2.1" fill="#ef4444" />
+          </svg>
+        </span>
+        <span class="brand-text">
+          <strong>Nexo</strong>
+          <small>Visión de soldadura · IPC-A-610G</small>
+        </span>
+      </a>
+      <nav class="topnav">
+        <a href="#inspeccion" class="active">Inspección</a>
+        <a href="#hallazgos">Hallazgos</a>
+        <a href="#recomendaciones">Recomendaciones</a>
+        <button class="link" id="btnHelp" type="button">Cómo usar</button>
+      </nav>
+      <div class="model-chip" id="modelStatus">
+        <span class="dot loading" id="modelStatusDot"></span>
+        <span id="modelStatusText">Cargando modelo…</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="stage-col" id="inspeccion">
+        <div class="stage-card">
+          <div class="stage" id="stage">
+            <video id="video" playsinline muted autoplay hidden></video>
+            <canvas id="liveCanvas" hidden></canvas>
+            <img id="captured" alt="Fotografía capturada de la PCB" hidden />
+            <canvas id="overlay" aria-hidden="true"></canvas>
+
+            <div class="stage-placeholder" id="stagePlaceholder">
+              <div class="placeholder-art" aria-hidden="true">
+                <svg viewBox="0 0 240 150" width="240" height="150">
+                  <rect x="10" y="18" width="220" height="114" rx="10" fill="#0e1c20" stroke="#1f3a40" />
+                  <g stroke="#1f3a40" stroke-width="2" fill="none">
+                    <path d="M30 40h52v34H30zM150 40h60v20h-60zM30 96h84v20H30zM140 84h70v32h-70z" />
+                  </g>
+                  <g fill="none" stroke-width="2.5">
+                    <rect x="26" y="36" width="60" height="42" rx="3" stroke="#22c55e" />
+                    <rect x="146" y="36" width="68" height="28" rx="3" stroke="#f59e0b" />
+                    <rect x="136" y="80" width="78" height="40" rx="3" stroke="#ef4444" />
+                  </g>
+                  <circle cx="196" cy="30" r="12" fill="none" stroke="#2a4a52" stroke-width="2" />
+                  <path d="M188 30h16M196 22v16" stroke="#2a4a52" stroke-width="2" />
+                </svg>
+              </div>
+              <h2>Inspecciona la soldadura de tu PCB</h2>
+              <p>
+                Activa la cámara o carga una fotografía. El detector marca en
+                <b class="ok">verde</b> las uniones conformes, en <b class="warn">naranja</b> las aceptables
+                con observación y en <b class="fail">rojo</b> las no conformes.
+              </p>
+              <div class="placeholder-actions">
+                <button class="btn primary" id="btnStartCam" type="button">
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="13" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+                  Activar cámara
+                </button>
+                <button class="btn ghost" id="btnUpload" type="button">Subir foto</button>
+                <button class="btn ghost" id="btnSamples" type="button">Ver muestra</button>
+              </div>
+            </div>
+
+            <div class="hud" id="hud" hidden>
+              <div class="hud-item"><span class="hud-label">FPS</span><span id="hudFps">—</span></div>
+              <div class="hud-item"><span class="hud-label">Inferencia</span><span id="hudMs">—</span></div>
+              <div class="hud-item"><span class="hud-label">Uniones</span><span id="hudCount">0</span></div>
+              <div class="hud-item hud-live" id="hudLive"><span class="pulse"></span> EN VIVO</div>
+            </div>
+
+            <div class="stage-toolbar" id="stageToolbar" hidden>
+              <select id="cameraSelect" class="control" title="Cámara"></select>
+              <button class="tool" id="btnTorch" type="button" title="Linterna" hidden>☀</button>
+              <label class="tool zoom">
+                <span>Ampliación</span>
+                <input id="zoomRange" type="range" min="0.6" max="2.4" step="0.1" value="1" title="Escala de la ventana de análisis" />
+                <output id="zoomValue">1.0×</output>
+              </label>
+              <button class="tool" id="btnStopCam" type="button" title="Detener cámara" hidden>⏹</button>
+            </div>
+
+            <div class="progress" id="progress" hidden>
+              <div class="progress-inner">
+                <div class="progress-title" id="progressTitle">Analizando imagen…</div>
+                <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+                <div class="progress-text" id="progressText">Preparando el modelo</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stage-actions">
+            <button class="btn primary capture" id="btnCapture" type="button" disabled>
+              <span class="rec"></span> Capturar y analizar
+            </button>
+            <button class="btn ghost" id="btnNewCapture" type="button" hidden>Nueva captura</button>
+            <button class="btn ghost" id="btnUpload2" type="button">Subir foto</button>
+            <button class="btn ghost" id="btnSample2" type="button">Muestra</button>
+            <button class="btn ghost" id="btnValidate" type="button" hidden>Validar vs. etiquetas</button>
+            <input type="file" id="fileInput" accept="image/*" hidden />
+            <div class="spacer"></div>
+            <span class="hint" id="stageHint">Encuadra la placa y acércate a las uniones que quieras revisar.</span>
+          </div>
+        </div>
+
+        <div class="results" id="hallazgos">
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="detections" role="tab" aria-selected="true">Detecciones <span class="tab-count" id="tabCount">0</span></button>
+            <button class="tab" data-tab="recommendations" role="tab" aria-selected="false">Recomendaciones</button>
+            <button class="tab" data-tab="history" role="tab" aria-selected="false">Historial</button>
+          </div>
+
+          <div class="panel active" id="panel-detections" role="tabpanel">
+            <div class="table-wrap">
+              <table class="detections" id="detectionsTable">
+                <thead>
+                  <tr>
+                    <th>#</th><th>Severidad</th><th>Hallazgo</th><th>Confianza</th><th>Centro (px)</th><th>Referencia IPC</th>
+                  </tr>
+                </thead>
+                <tbody id="detectionsBody">
+                  <tr class="empty-row"><td colspan="6">Aún no hay detecciones. Captura una imagen para comenzar.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel" id="panel-recommendations" role="tabpanel">
+            <div id="recommendationsList" class="rec-list">
+              <p class="muted">Las recomendaciones se generan a partir de los hallazgos de la inspección.</p>
+            </div>
+          </div>
+
+          <div class="panel" id="panel-history" role="tabpanel">
+            <div class="history-head">
+              <p class="muted">Las últimas inspecciones se guardan en este navegador.</p>
+              <button class="btn tiny ghost" id="btnClearHistory" type="button">Borrar historial</button>
+            </div>
+            <div id="historyList" class="history-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side" id="recomendaciones">
+        <section class="card verdict-card">
+          <div class="card-head">
+            <h3>Resultado</h3>
+            <span class="chip" id="verdictChip">Sin datos</span>
+          </div>
+          <div class="gauge-wrap">
+            <div class="gauge" id="gauge" style="--pct:0;--ring:#22c55e">
+              <div class="gauge-inner">
+                <strong id="gaugePct">0 %</strong>
+                <span>conforme</span>
+              </div>
+            </div>
+            <div class="gauge-legend">
+              <div><span class="dot ok"></span><b id="countOk">0</b> conformes</div>
+              <div><span class="dot warn"></span><b id="countWarn">0</b> observaciones</div>
+              <div><span class="dot fail"></span><b id="countFail">0</b> no conformes</div>
+              <div class="total"><span id="totalJoints">0</span> uniones analizadas</div>
+            </div>
+          </div>
+          <div class="verdict-note" id="verdictNote">Captura una imagen para obtener el veredicto.</div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h3>Ajustes de detección</h3></div>
+          <label class="range-row">
+            <span>Confianza mínima</span>
+            <input id="confRange" type="range" min="0.15" max="0.85" step="0.05" value="0.35" />
+            <output id="confValue">35 %</output>
+          </label>
+          <div class="legend-filters">
+            <label class="filter ok"><input type="checkbox" id="toggleOk" checked /><span class="dot ok"></span>Conformes</label>
+            <label class="filter warn"><input type="checkbox" id="toggleWarn" checked /><span class="dot warn"></span>Observaciones</label>
+            <label class="filter fail"><input type="checkbox" id="toggleFail" checked /><span class="dot fail"></span>No conformes</label>
+          </div>
+          <label class="switch-row"><input type="checkbox" id="showLabels" checked /> Mostrar etiquetas en la imagen</label>
+          <label class="switch-row"><input type="checkbox" id="onlyDefects" /> Ocultar uniones conformes</label>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h3>Datos del informe</h3></div>
+          <label class="field"><span>Placa / PCB</span><input id="boardId" type="text" placeholder="PCB-1042 · REV C" /></label>
+          <label class="field"><span>Operador</span><input id="operator" type="text" placeholder="Nombre y apellido" /></label>
+          <label class="field"><span>Clase IPC objetivo</span>
+            <select id="ipcClass">
+              <option value="1">Clase 1 · producto general</option>
+              <option value="2" selected>Clase 2 · servicio dedicado</option>
+              <option value="3">Clase 3 · alta fiabilidad</option>
+            </select>
+          </label>
+          <label class="field"><span>Notas</span><textarea id="notes" rows="2" placeholder="Observaciones del lote, condiciones de iluminación…"></textarea></label>
+        </section>
+
+        <section class="card actions-card">
+          <div class="card-head"><h3>Informe</h3></div>
+          <button class="btn primary block" id="btnPdf" type="button" disabled>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 3h8l4 4v14H6z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9 12h6M9 16h6" stroke="currentColor" stroke-width="1.7"/></svg>
+            Descargar PDF con evidencia
+          </button>
+          <button class="btn ghost block" id="btnJson" type="button" disabled>Exportar resultados (JSON)</button>
+          <button class="btn ghost block" id="btnReset" type="button">Reiniciar inspección</button>
+          <p class="fineprint">
+            El PDF incluye la foto con las cajas, el resumen por severidad, las uniones prioritarias y
+            recomendaciones basadas en IPC-A-610G.
+          </p>
+        </section>
+
+        <section class="card model-card">
+          <div class="card-head"><h3>Modelo</h3><span class="chip tiny" id="modelChip">—</span></div>
+          <dl class="model-stats">
+            <div><dt>Arquitectura</dt><dd>Nexo SolderNet · YOLO anchor-free</dd></div>
+            <div><dt>Entrada</dt><dd id="modelInput">—</dd></div>
+            <div><dt>Parámetros</dt><dd id="modelParams">—</dd></div>
+            <div><dt>Clases</dt><dd>9 condiciones visuales</dd></div>
+            <div><dt>Ejecución</dt><dd>ONNX Runtime Web (WASM, local)</dd></div>
+          </dl>
+          <p class="fineprint">Ninguna imagen sale de tu dispositivo: la inferencia ocurre en el navegador.</p>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>Nexo · Inspección visual asistida por IA · criterios IPC-A-610G (2017)</span>
+      <span class="footer-links">
+        <button class="link" id="btnAbout" type="button">Alcance y limitaciones</button>
+        <a href="../">Nexo 3D</a>
+      </span>
+    </footer>
+
+    <!-- Modal de ayuda -->
+    <div class="modal" id="helpModal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+        <button class="modal-close" id="btnCloseHelp" type="button" aria-label="Cerrar">×</button>
+        <h2 id="helpTitle">Cómo obtener una buena inspección</h2>
+        <div class="modal-body">
+          <ol>
+            <li><b>Ilumina de forma difusa.</b> La luz directa genera reflejos especulares sobre el estaño y confunde al detector. Usa luz lateral suave o un difusor.</li>
+            <li><b>Acércate.</b> Cada unión debe ocupar al menos 12–20 píxeles. Con la cámara del teléfono, encuadra una zona de la placa (2–4 cm) en lugar de la placa completa.</li>
+            <li><b>Enfoca y estabiliza.</b> Apoya el teléfono o usa un soporte; el desenfoque es la principal causa de falsos negativos.</li>
+            <li><b>Captura y revisa.</b> Pulsa <b>Capturar y analizar</b>: se ejecuta un análisis por teselas de mayor resolución que la vista en vivo. Ajusta la confianza mínima si ves detecciones dudosas.</li>
+            <li><b>Genera el informe.</b> Completa los datos de la placa y del operador y descarga el PDF con la evidencia y las recomendaciones.</li>
+          </ol>
+          <h3>Qué significan los colores</h3>
+          <ul class="legend-list">
+            <li><span class="dot ok"></span><b>Verde · Conforme.</b> Filete cóncavo, humectación ≤ 90°, cobertura completa (IPC-A-610G §5.1).</li>
+            <li><span class="dot warn"></span><b>Naranja · Aceptable con observación.</b> Superficie mate/granulosa o cobertura reducida que aún cumple los mínimos; es un indicador de proceso (§5.1, Tabla 7-4, §8.3.1).</li>
+            <li><span class="dot fail"></span><b>Rojo · No conforme.</b> Unión fría, soldadura insuficiente, falta de humectación, vacíos, puente o ausencia de soldadura (§5.2).</li>
+          </ul>
+          <h3>Alcance y limitaciones</h3>
+          <p>
+            Esta aplicación es una ayuda de inspección visual. El modelo fue entrenado con imágenes
+            sintéticas de placas y criterios de IPC-A-610G; no sustituye la inspección humana, los ensayos
+            eléctricos ni la verificación por rayos X de uniones ocultas (BGA/BTC). Confirma cada defecto
+            antes de retrabajar la placa.
+          </p>
+          <p class="fineprint">Atajos: <kbd>Espacio</kbd> capturar · <kbd>P</kbd> PDF · <kbd>R</kbd> reiniciar · <kbd>?</kbd> ayuda.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+    <div class="sr-only" id="announcer" aria-live="polite"></div>
+  </body>
+</html>

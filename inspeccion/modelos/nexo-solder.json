@@ -1,0 +1,61 @@
+{
+  "classes": [
+    "ok",
+    "warn_dull",
+    "warn_coverage",
+    "fail_cold",
+    "fail_insufficient",
+    "fail_nonwet",
+    "fail_void",
+    "fail_bridge",
+    "fail_missing"
+  ],
+  "strides": [
+    8,
+    16,
+    32
+  ],
+  "size": 384,
+  "mean": [
+    0.48500001430511475,
+    0.4560000002384186,
+    0.4059999883174896
+  ],
+  "std": [
+    0.2290000021457672,
+    0.2240000069141388,
+    0.22499999403953552
+  ],
+  "inputs": [
+    "images"
+  ],
+  "outputs": [
+    "out0",
+    "out1",
+    "out2"
+  ],
+  "params": 299103,
+  "arch": "nexo-soldernet",
+  "trained": "2026-10-20",
+  "dataset": "sint\u00e9tico \u00b7 380 placas / 4560 recortes de 512 px",
+  "metrics": {
+    "full_board": {
+      "precision": 0.632,
+      "recall": 0.925,
+      "f1": 0.751,
+      "conf": 0.35,
+      "n_boards": 20
+    },
+    "crop_val": {
+      "precision": 0.714,
+      "recall": 0.715,
+      "f1": 0.715,
+      "epoch": 16
+    },
+    "demo_browser": {
+      "placa_demo_01": 0.934,
+      "placa_demo_02": 0.833,
+      "placa_demo_03": 0.858
+    }
+  }
+}
