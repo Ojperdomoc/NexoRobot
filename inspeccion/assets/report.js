@@ -53,6 +53,8 @@ export function buildInspectionReport(payload) {
   const {
     jsPDF,
     imageDataUrl,
+    imageSize = null,
+    details = [],
     summary,
     detections,
     recommendations,
@@ -241,6 +243,30 @@ export function buildInspectionReport(payload) {
     doc.setLineWidth(0.3);
     doc.rect(x - 0.5, y - 0.5, w + 1, h + 1);
     doc.addImage(imageDataUrl, 'JPEG', x, y, w, h, undefined, 'FAST');
+
+    // zonas que se amplían en la página siguiente
+    const srcW = imageSize?.w || img.width;
+    const srcH = imageSize?.h || img.height;
+    if (details.length && srcW && srcH) {
+      details.forEach((d) => {
+        const rx = x + (d.x / srcW) * w;
+        const ry = y + (d.y / srcH) * h;
+        const rw = (d.w / srcW) * w;
+        const rh = (d.h / srcH) * h;
+        doc.setDrawColor(255, 255, 255);
+        doc.setLineWidth(0.45);
+        doc.rect(rx, ry, rw, rh, 'S');
+        doc.setDrawColor(10, 30, 33);
+        doc.setLineWidth(0.2);
+        doc.rect(rx - 0.35, ry - 0.35, rw + 0.7, rh + 0.7, 'S');
+        doc.setFillColor(255, 255, 255);
+        doc.rect(rx, ry, 9, 4.6, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.6);
+        doc.setTextColor(10, 30, 33);
+        doc.text(d.label, rx + 1.2, ry + 3.3);
+      });
+    }
     y += h + 5;
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(7.6);
@@ -252,6 +278,49 @@ export function buildInspectionReport(payload) {
       { align: 'center', maxWidth: CONTENT_W },
     );
     y += 7;
+  }
+
+  // ─────────────────── ampliaciones (detalle 1:1) ───────────────────
+  if (details.length) {
+    heading('Vistas ampliadas de las zonas críticas');
+    paragraph(
+      'Recortes a escala nativa (×2 al renderizar) de las zonas con más uniones no conformes. ' +
+        'Cada recorte corresponde al rectángulo blanco marcado con su etiqueta sobre la evidencia fotográfica.',
+      { size: 8, color: MUTED, lh: 4 },
+    );
+    y += 1;
+
+    const gap = 6;
+    const cellW = (CONTENT_W - gap) / 2;
+    const cellH = cellW * 0.75;
+    const rowH = cellH + 12;
+    let rowY = y;
+    details.forEach((d, i) => {
+      const col = i % 2;
+      if (col === 0) {
+        ensure(rowH);
+        rowY = y;
+      }
+      const cx = M + col * (cellW + gap);
+      doc.setDrawColor(LINE[0], LINE[1], LINE[2]);
+      doc.setLineWidth(0.25);
+      doc.rect(cx - 0.4, rowY - 0.4, cellW + 0.8, cellH + 0.8, 'S');
+      doc.addImage(d.dataUrl, 'JPEG', cx, rowY, cellW, cellH, undefined, 'FAST');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.4);
+      setColor(INK);
+      doc.text(`${d.label} · zona (${d.x}, ${d.y})`, cx, rowY + cellH + 3.4);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      setColor(MUTED);
+      doc.text(
+        `${d.fails} no conformes · ${d.warns} observaciones · ${d.total} uniones en el recorte`,
+        cx,
+        rowY + cellH + 7,
+      );
+      if (col === 1 || i === details.length - 1) y = rowY + rowH;
+    });
+    y += 2;
   }
 
   // ─────────────────────────── hallazgos ───────────────────────────

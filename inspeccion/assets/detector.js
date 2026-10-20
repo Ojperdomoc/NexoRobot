@@ -198,6 +198,9 @@ export class SolderDetector {
           all.push(d);
         }
         done++;
+        // cede el hilo entre teselas para que el navegador pinte la barra
+        // de progreso y la interfaz siga respondiendo mientras analiza
+        await new Promise((resolve) => setTimeout(resolve, 0));
         onProgress(done / total, Math.round(performance.now() - t0));
       }
     }

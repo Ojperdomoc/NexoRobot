@@ -76,6 +76,14 @@ El script escucha en `0.0.0.0`, sirve `.wasm` con el MIME correcto y desactiva
 la caché. También vale cualquier servidor estático, por ejemplo
 `python3 -m http.server 8080` desde la raíz del repositorio.
 
+Con la foto ya analizada, el visor permite **ampliar** (rueda del ratón, botones
+`+ / −` o pellizco en pantalla táctil), **desplazarse** arrastrando y volver a la
+vista completa con `⟲`. Las etiquetas solo aparecen en las uniones que caben y
+no se solapan, de modo que al acercarse se lee cada caja con su clase y
+confianza. El informe PDF incluye, además de la evidencia completa, **hasta 6
+vistas ampliadas ×2** de las zonas con más defectos, marcadas con `D1…D6` sobre
+la foto general.
+
 La cámara requiere **HTTPS** o `localhost`. En producción, GitHub Pages ya
 publica la carpeta `inspeccion/` mediante el workflow del repositorio.
 

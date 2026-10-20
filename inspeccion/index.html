@@ -102,6 +102,13 @@
               <button class="tool" id="btnStopCam" type="button" title="Detener cámara" hidden>⏹</button>
             </div>
 
+            <div class="zoom-controls" id="zoomControls" hidden>
+              <button class="tool" id="btnZoomOut" type="button" title="Alejar (rueda del ratón)" aria-label="Alejar">−</button>
+              <span class="zoom-level" id="zoomLevel">1.0×</span>
+              <button class="tool" id="btnZoomIn" type="button" title="Acercar (rueda del ratón)" aria-label="Acercar">+</button>
+              <button class="tool" id="btnZoomReset" type="button" title="Ajustar a la ventana" aria-label="Ajustar a la ventana">⟲</button>
+            </div>
+
             <div class="progress" id="progress" hidden>
               <div class="progress-inner">
                 <div class="progress-title" id="progressTitle">Analizando imagen…</div>
@@ -137,7 +144,7 @@
               <table class="detections" id="detectionsTable">
                 <thead>
                   <tr>
-                    <th>#</th><th>Severidad</th><th>Hallazgo</th><th>Confianza</th><th>Centro (px)</th><th>Referencia IPC</th>
+                    <th>#</th><th>Severidad</th><th>Hallazgo</th><th>Confianza</th><th class="hide-xs">Centro (px)</th><th class="hide-xs">Referencia IPC</th>
                   </tr>
                 </thead>
                 <tbody id="detectionsBody">
@@ -263,6 +270,7 @@
             <li><b>Acércate.</b> Cada unión debe ocupar al menos 12–20 píxeles. Con la cámara del teléfono, encuadra una zona de la placa (2–4 cm) en lugar de la placa completa.</li>
             <li><b>Enfoca y estabiliza.</b> Apoya el teléfono o usa un soporte; el desenfoque es la principal causa de falsos negativos.</li>
             <li><b>Captura y revisa.</b> Pulsa <b>Capturar y analizar</b>: se ejecuta un análisis por teselas de mayor resolución que la vista en vivo. Ajusta la confianza mínima si ves detecciones dudosas.</li>
+            <li><b>Amplía la captura.</b> Usa la rueda del ratón, los botones <b>+ / −</b> o pellizca sobre la imagen para inspeccionar cada unión; arrastra para desplazarte y <b>⟲</b> para volver a la vista completa.</li>
             <li><b>Genera el informe.</b> Completa los datos de la placa y del operador y descarga el PDF con la evidencia y las recomendaciones.</li>
           </ol>
           <h3>Qué significan los colores</h3>
@@ -278,7 +286,7 @@
             eléctricos ni la verificación por rayos X de uniones ocultas (BGA/BTC). Confirma cada defecto
             antes de retrabajar la placa.
           </p>
-          <p class="fineprint">Atajos: <kbd>Espacio</kbd> capturar · <kbd>P</kbd> PDF · <kbd>R</kbd> reiniciar · <kbd>?</kbd> ayuda.</p>
+          <p class="fineprint">Atajos: <kbd>Espacio</kbd> capturar · <kbd>P</kbd> PDF · <kbd>R</kbd> reiniciar · <kbd>?</kbd> ayuda. En el visor: <kbd>rueda</kbd> zoom · <kbd>arrastrar</kbd> desplazar · <kbd>doble clic</kbd> ampliar.</p>
         </div>
       </div>
     </div>

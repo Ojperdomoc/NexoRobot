@@ -67,6 +67,8 @@ const state = {
   sample: null,
   groundTruth: null,
   activeTab: 'detections',
+  // zoom/pan del visor en modo captura (1 = ajustado a la ventana)
+  view: { zoom: 1, cx: 0.5, cy: 0.5 },
 };
 
 /* ─────────────────────────── utilidades ─────────────────────────── */
@@ -444,6 +446,28 @@ function renderLiveCanvas(region) {
   canvas.hidden = false;
 }
 
+/**
+ * Rectángulo que ocupa la captura dentro del visor con el zoom actual.
+ * `cx`/`cy` (0–1) indican qué punto de la imagen queda en el centro.
+ */
+function captureGeometry(zoom = state.view.zoom, cx = state.view.cx, cy = state.view.cy) {
+  const W = el.stage.clientWidth;
+  const H = el.stage.clientHeight;
+  const sw = state.sourceSize.w || 1;
+  const sh = state.sourceSize.h || 1;
+  const fit = Math.min(W / sw, H / sh);
+  const z = clamp(zoom || 1, 1, 8);
+  const w = sw * fit * z;
+  const h = sh * fit * z;
+  let x = W / 2 - clamp(cx, 0, 1) * w;
+  let y = H / 2 - clamp(cy, 0, 1) * h;
+  if (w <= W + 0.5) x = (W - w) / 2;
+  else x = clamp(x, W - w, 0);
+  if (h <= H + 0.5) y = (H - h) / 2;
+  else y = clamp(y, H - h, 0);
+  return { x, y, w, h, z };
+}
+
 function mediaRect() {
   const stage = el.stage;
   const W = stage.clientWidth;
@@ -454,10 +478,25 @@ function mediaRect() {
   const sw = state.sourceSize.w;
   const sh = state.sourceSize.h;
   if (!sw || !sh) return { x: 0, y: 0, w: W, h: H };
-  const scale = Math.min(W / sw, H / sh);
-  const w = sw * scale;
-  const h = sh * scale;
-  return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  return captureGeometry();
+}
+
+/**
+ * Aplica el zoom al <img> de la captura. El overlay usa el mismo rectángulo,
+ * así que las cajas siguen a la imagen al ampliar y desplazar.
+ */
+function applyCaptureTransform() {
+  const img = el.captured;
+  if (!img || !state.capture || state.mode === 'live') return;
+  const rect = mediaRect();
+  img.style.left = `${rect.x}px`;
+  img.style.top = `${rect.y}px`;
+  img.style.right = 'auto';
+  img.style.bottom = 'auto';
+  img.style.width = `${rect.w}px`;
+  img.style.height = `${rect.h}px`;
+  img.style.objectFit = 'fill';
+  img.style.cursor = state.view.zoom > 1 ? 'grab' : 'zoom-in';
 }
 
 function draw() {
@@ -473,6 +512,7 @@ function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (!state.sourceSize.w) return;
+  if (state.mode !== 'live') applyCaptureTransform();
   const rect = mediaRect();
   const isLive = state.mode === 'live';
   const region = isLive ? liveRegion() : null;
@@ -508,9 +548,18 @@ function draw() {
     ctx.restore();
   }
 
-  // cajas
+  // cajas: primero los defectos y las cajas grandes, para que sus etiquetas
+  // tengan prioridad cuando hay cientos de uniones en pantalla
   const showLabels = state.settings.showLabels;
-  const sorted = dets.slice().sort((a, b) => (a.severity === 'fail' ? -1 : 1) - (b.severity === 'fail' ? -1 : 1));
+  const sevRank = { fail: 0, warn: 1, ok: 2 };
+  const sorted = dets.slice().sort((a, b) => {
+    const r = (sevRank[a.severity] ?? 3) - (sevRank[b.severity] ?? 3);
+    if (r) return r;
+    if (state.mode === 'live') return 0;
+    return b.w * b.h - a.w * a.h;
+  });
+  const placedLabels = [];
+  const collides = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
   for (const d of sorted) {
     const color = SEVERITY_COLORS[d.severity] || '#888';
     const x = rect.x + (d.x - offX) * sx;
@@ -530,23 +579,30 @@ function draw() {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    if (showLabels && w >= 22) {
+    // Una etiqueta solo se dibuja si la caja es legible y no pisa otra
+    // etiqueta: con 300 uniones encimadas el texto tapaba la placa.
+    const minW = state.view.zoom > 1.6 ? 20 : 34;
+    if (showLabels && w >= minW && h >= 6) {
       const label = `${(CLASS_INFO[d.className]?.label || d.className)} · ${Math.round(d.score * 100)}%`;
-      ctx.font = '600 10.5px Inter, system-ui, sans-serif';
+      ctx.font = '600 10px Inter, system-ui, sans-serif';
       const tw = ctx.measureText(label).width + 10;
-      const th = 15;
-      let lx = x;
+      const th = 14;
+      let lx = clamp(x, rect.x + 1, rect.x + rect.w - tw - 1);
       let ly = y - th - 3;
-      if (ly < rect.y + 2) ly = y + h + 3;
-      if (lx + tw > rect.x + rect.w) lx = rect.x + rect.w - tw;
-      if (lx < rect.x) lx = rect.x;
-      ctx.fillStyle = hexToRgba(color, 0.92);
-      ctx.beginPath();
-      ctx.roundRect(lx, ly, tw, th, 3);
-      ctx.fill();
-      ctx.fillStyle = d.severity === 'fail' ? '#fff' : '#08120f';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, lx + 5, ly + th / 2 + 0.5);
+      if (ly < Math.max(rect.y + 1, 2)) ly = y + h + 3;
+      if (ly + th > rect.y + rect.h - 1) ly = y - th - 3;
+      const box = { x: lx, y: ly, w: tw, h: th };
+      const overlaps = placedLabels.some((p) => collides(p, box));
+      if (!overlaps && ly > rect.y - 1 && ly + th < rect.y + rect.h + 1) {
+        placedLabels.push(box);
+        ctx.fillStyle = hexToRgba(color, 0.92);
+        ctx.beginPath();
+        ctx.roundRect(lx, ly, tw, th, 3);
+        ctx.fill();
+        ctx.fillStyle = d.severity === 'fail' ? '#fff' : '#08120f';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, lx + 5, ly + th / 2 + 0.5);
+      }
     }
   }
 
@@ -556,6 +612,144 @@ function draw() {
     el.hudMs.textContent = `${state.inference.ms || 0} ms`;
     el.hudFps.textContent = isLive ? state.fps.toFixed(1) : '—';
   }
+}
+
+/* ─────────────────────────── zoom del visor ─────────────────────────── */
+
+function resetView() {
+  state.view.zoom = 1;
+  state.view.cx = 0.5;
+  state.view.cy = 0.5;
+  updateZoomUI();
+}
+
+function updateZoomUI() {
+  if (!el.zoomControls) return;
+  const active = state.mode !== 'live' && !!state.capture;
+  el.zoomControls.hidden = !active;
+  el.btnZoomOut.disabled = !active || state.view.zoom <= 1.01;
+  el.btnZoomIn.disabled = !active || state.view.zoom >= 7.9;
+  el.zoomLevel.textContent = `${(active ? state.view.zoom : 1).toFixed(1)}×`;
+}
+
+/** Fija el zoom y el punto de la imagen (0–1) que queda al centro. */
+function setView(zoom, cx, cy) {
+  if (!state.capture || state.mode === 'live') return;
+  state.view.zoom = clamp(zoom, 1, 8);
+  if (cx != null) state.view.cx = clamp(cx, 0, 1);
+  if (cy != null) state.view.cy = clamp(cy, 0, 1);
+  const g = captureGeometry();
+  // recentra con la posición realmente aplicada (ya recortada al borde)
+  state.view.cx = clamp((el.stage.clientWidth / 2 - g.x) / g.w, 0, 1);
+  state.view.cy = clamp((el.stage.clientHeight / 2 - g.y) / g.h, 0, 1);
+  updateZoomUI();
+  draw();
+}
+
+/** Amplía manteniendo bajo el cursor el mismo punto de la imagen. */
+function zoomAt(clientX, clientY, factor) {
+  const g = captureGeometry();
+  const box = el.stage.getBoundingClientRect();
+  const px = clientX - box.left;
+  const py = clientY - box.top;
+  const ix = (px - g.x) / g.w;
+  const iy = (py - g.y) / g.h;
+  const z2 = clamp(g.z * factor, 1, 8);
+  const nx = px - ix * g.w * (z2 / g.z);
+  const ny = py - iy * g.h * (z2 / g.z);
+  const W = el.stage.clientWidth;
+  const H = el.stage.clientHeight;
+  setView(z2, (W / 2 - nx) / (g.w * (z2 / g.z)), (H / 2 - ny) / (g.h * (z2 / g.z)));
+}
+
+function wireZoom() {
+  const stage = el.stage;
+  if (!stage) return;
+  stage.addEventListener(
+    'wheel',
+    (ev) => {
+      if (state.mode !== 'capture' || !state.capture) return;
+      ev.preventDefault();
+      zoomAt(ev.clientX, ev.clientY, Math.exp(-ev.deltaY * 0.0016));
+    },
+    { passive: false },
+  );
+  stage.addEventListener('dblclick', (ev) => {
+    if (state.mode !== 'capture' || !state.capture) return;
+    if (state.view.zoom > 1.05) setView(1, 0.5, 0.5);
+    else zoomAt(ev.clientX, ev.clientY, 3);
+  });
+  // gestos: 1 dedo = desplazar, 2 dedos = pellizcar para ampliar
+  const pointers = new Map();
+  let drag = null;
+  let pinch = null;
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  stage.addEventListener('pointerdown', (ev) => {
+    if (state.mode !== 'capture' || !state.capture) return;
+    if (ev.target.closest('button, input, select, label')) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { d: Math.max(1, dist(a, b)), zoom: state.view.zoom, cx: state.view.cx, cy: state.view.cy };
+      drag = null;
+    } else if (state.view.zoom > 1.01) {
+      drag = { x: ev.clientX, y: ev.clientY, cx: state.view.cx, cy: state.view.cy };
+      stage.setPointerCapture?.(ev.pointerId);
+      stage.classList.add('panning');
+    }
+  });
+  stage.addEventListener('pointermove', (ev) => {
+    if (!pointers.has(ev.pointerId)) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pinch && pointers.size >= 2) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.max(1, dist(a, b));
+      const box = stage.getBoundingClientRect();
+      const midX = (a.x + b.x) / 2 - box.left;
+      const midY = (a.y + b.y) / 2 - box.top;
+      const g0 = captureGeometry(pinch.zoom, pinch.cx, pinch.cy);
+      const ix = (midX - g0.x) / g0.w;
+      const iy = (midY - g0.y) / g0.h;
+      const z2 = clamp(pinch.zoom * (d / pinch.d), 1, 8);
+      const W = stage.clientWidth;
+      const H = stage.clientHeight;
+      const scale2 = z2 / pinch.zoom;
+      setView(z2, (W / 2 - (midX - ix * g0.w * scale2)) / (g0.w * scale2), (H / 2 - (midY - iy * g0.h * scale2)) / (g0.h * scale2));
+      return;
+    }
+    if (!drag) return;
+    const g = captureGeometry();
+    setView(
+      state.view.zoom,
+      drag.cx - (ev.clientX - drag.x) / g.w,
+      drag.cy - (ev.clientY - drag.y) / g.h,
+    );
+  });
+  const endDrag = (ev) => {
+    pointers.delete(ev.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) {
+      drag = null;
+      stage.classList.remove('panning');
+    }
+  };
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', endDrag);
+  el.btnZoomIn?.addEventListener('click', () => {
+    const b = el.stage.getBoundingClientRect();
+    zoomAt(b.left + b.width / 2, b.top + b.height / 2, 1.6);
+  });
+  el.btnZoomOut?.addEventListener('click', () => {
+    const b = el.stage.getBoundingClientRect();
+    zoomAt(b.left + b.width / 2, b.top + b.height / 2, 1 / 1.6);
+  });
+  el.btnZoomReset?.addEventListener('click', () => {
+    resetView();
+    draw();
+  });
+  window.addEventListener('resize', () => {
+    if (state.mode === 'capture') draw();
+  });
 }
 
 /* ─────────────────────────── captura / análisis ─────────────────────────── */
@@ -607,6 +801,8 @@ function setCaptureFromCanvas(canvas, sourceLabel) {
   state.mode = 'capture';
   state.sourceSize = { w: canvas.width, h: canvas.height };
   setStageAspect(canvas.width, canvas.height);
+  resetView();
+  updateZoomUI();
   state.inference.source = sourceLabel;
   state.folio = state.folio || folioFor();
 }
@@ -751,11 +947,11 @@ function renderTable() {
     const color = SEVERITY_COLORS[d.severity];
     return `<tr>
       <td class="idx">${i + 1}</td>
-      <td><span class="sev"><span class="dot" style="background:${color}"></span>${SEVERITY_LABELS[d.severity]}</span></td>
+      <td><span class="sev"><span class="dot" style="background:${color}"></span><span class="sev-text">${SEVERITY_LABELS[d.severity]}</span></span></td>
       <td>${info.label || d.className}</td>
       <td><span class="conf"><span class="conf-bar"><i style="width:${Math.round(d.score * 100)}%;background:${color}"></i></span>${Math.round(d.score * 100)} %</span></td>
-      <td class="pos">${Math.round(d.cx)}, ${Math.round(d.cy)}</td>
-      <td class="ref">${(info.references?.[0] || 'IPC-A-610G').replace('IPC-A-610G ', '')}</td>
+      <td class="pos hide-xs">${Math.round(d.cx)}, ${Math.round(d.cy)}</td>
+      <td class="ref hide-xs">${(info.references?.[0] || 'IPC-A-610G').replace('IPC-A-610G ', '')}</td>
     </tr>`;
   });
   body.innerHTML = rows.join('');
@@ -799,6 +995,7 @@ function updateActionState() {
   el.btnCapture.disabled = !(live && state.modelReady);
   el.btnCapture.hidden = !live;
   el.btnNewCapture.hidden = live || !state.stream;
+  updateZoomUI();
   el.btnPdf.disabled = !state.capture || !state.modelReady;
   el.btnJson.disabled = !state.capture;
   el.btnValidate.hidden = !state.groundTruth;
@@ -889,6 +1086,10 @@ function renderAnnotatedCanvas(maxWidth = 1600, withLabels = true) {
   ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
   const dets = state.detections;
   ctx.textBaseline = 'middle';
+  // En la evidencia completa solo se rotulan los hallazgos (rojos/naranjas):
+  // con ~300 uniones conformes la placa quedaría tapada de texto.
+  const placed = [];
+  const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
   for (const d of dets) {
     const color = SEVERITY_COLORS[d.severity] || '#888';
     const x = d.x * scale;
@@ -902,24 +1103,140 @@ function renderAnnotatedCanvas(maxWidth = 1600, withLabels = true) {
     ctx.roundRect(x, y, w, h, Math.min(5, w / 4, h / 4));
     ctx.fill();
     ctx.stroke();
-    if (withLabels && w > 26) {
+    if (withLabels && d.severity !== 'ok' && w > 30) {
       const label = `${(CLASS_INFO[d.className]?.label || d.className)} ${Math.round(d.score * 100)}%`;
-      ctx.font = `600 ${Math.max(9, Math.min(13, w * 0.22))}px Inter, system-ui, sans-serif`;
+      ctx.font = `600 ${Math.max(9, Math.min(12, w * 0.2))}px Inter, system-ui, sans-serif`;
       const tw = ctx.measureText(label).width + 8;
-      const th = Math.max(13, Math.min(18, h * 0.7));
-      let lx = x;
+      const th = Math.max(12, Math.min(16, h * 0.8));
+      let lx = clamp(x, 1, Math.max(1, canvas.width - tw - 1));
       let ly = y - th - 2;
-      if (ly < 0) ly = y + h + 2;
-      if (lx + tw > canvas.width) lx = canvas.width - tw;
-      ctx.fillStyle = hexToRgba(color, 0.92);
-      ctx.beginPath();
-      ctx.roundRect(lx, ly, tw, th, 3);
-      ctx.fill();
-      ctx.fillStyle = d.severity === 'fail' ? '#fff' : '#08120f';
-      ctx.fillText(label, lx + 4, ly + th / 2 + 0.5);
+      if (ly < 1) ly = y + h + 2;
+      if (ly + th > canvas.height - 1) ly = y - th - 2;
+      const box = { x: lx, y: ly, w: tw, h: th };
+      if (!placed.some((p) => hits(p, box))) {
+        placed.push(box);
+        ctx.fillStyle = hexToRgba(color, 0.92);
+        ctx.beginPath();
+        ctx.roundRect(lx, ly, tw, th, 3);
+        ctx.fill();
+        ctx.fillStyle = d.severity === 'fail' ? '#fff' : '#08120f';
+        ctx.fillText(label, lx + 4, ly + th / 2 + 0.5);
+      }
     }
   }
   return canvas;
+}
+
+/**
+ * Recortes ampliados para el informe: busca las zonas con más uniones no
+ * conformes y las re-renderiza a escala nativa (×2) con sus cajas, para que
+ * el informe permita evaluar cada unión y no solo ver el tablero completo.
+ */
+function buildDetailCrops(maxRegions = 6) {
+  if (!state.capture) return [];
+  const src = state.capture.canvas;
+  const imgW = src.width;
+  const imgH = src.height;
+  const dets = state.detections.filter((d) => d.severity !== 'ok');
+  if (!dets.length) return [];
+
+  const cw = Math.round(clamp(imgW * 0.3, 300, 640));
+  const ch = Math.round(clamp(cw * 0.75, 225, 480));
+  const inside = (d, x, y) =>
+    d.x + d.w / 2 >= x && d.x + d.w / 2 <= x + cw && d.y + d.h / 2 >= y && d.y + d.h / 2 <= y + ch;
+  const score = (x, y) => dets.reduce((acc, d) => {
+    if (!inside(d, x, y)) return acc;
+    return acc + (d.severity === 'fail' ? 3 : 1);
+  }, 0);
+
+  // candidatos: centro de cada defecto, desplazado para que el recorte no se
+  // salga de la imagen
+  const candidates = dets
+    .slice()
+    .sort((a, b) => (b.severity === 'fail' ? 1 : 0) - (a.severity === 'fail' ? 1 : 0) || b.score - a.score)
+    .map((d) => {
+      const cx = d.x + d.w / 2;
+      const cy = d.y + d.h / 2;
+      return {
+        x: Math.round(clamp(cx - cw / 2, 0, Math.max(0, imgW - cw))),
+        y: Math.round(clamp(cy - ch / 2, 0, Math.max(0, imgH - ch))),
+      };
+    });
+
+  const chosen = [];
+  const overlap = (a, b) => {
+    const ix = Math.max(0, Math.min(a.x + cw, b.x + cw) - Math.max(a.x, b.x));
+    const iy = Math.max(0, Math.min(a.y + ch, b.y + ch) - Math.max(a.y, b.y));
+    return (ix * iy) / (cw * ch);
+  };
+  for (const c of candidates) {
+    if (chosen.length >= maxRegions) break;
+    if (chosen.some((r) => overlap(r, c) > 0.35)) continue;
+    if (score(c.x, c.y) <= 0) continue;
+    chosen.push(c);
+  }
+  chosen.sort((a, b) => a.y - b.y || a.x - b.x);
+
+  const scaleOut = 2;
+  return chosen.map((r, i) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = cw * scaleOut;
+    canvas.height = ch * scaleOut;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, r.x, r.y, cw, ch, 0, 0, canvas.width, canvas.height);
+    const k = (cw * scaleOut) / cw;
+    const local = state.detections.filter((d) => inside(d, r.x, r.y));
+    ctx.textBaseline = 'middle';
+    const placed = [];
+    const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    local
+      .slice()
+      .sort((a, b) => (a.severity === 'fail' ? -1 : 1) - (b.severity === 'fail' ? -1 : 1))
+      .forEach((d) => {
+        const color = SEVERITY_COLORS[d.severity] || '#888';
+        const x = (d.x - r.x) * k;
+        const y = (d.y - r.y) * k;
+        const w = d.w * k;
+        const h = d.h * k;
+        ctx.lineWidth = d.severity === 'fail' ? 3.2 : 2.4;
+        ctx.strokeStyle = color;
+        ctx.fillStyle = hexToRgba(color, d.severity === 'ok' ? 0.05 : 0.1);
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, Math.min(6, w / 3, h / 3));
+        ctx.fill();
+        ctx.stroke();
+        if (d.severity !== 'ok' && w > 26) {
+          const label = `${CLASS_INFO[d.className]?.label || d.className} ${Math.round(d.score * 100)}%`;
+          ctx.font = '600 15px Inter, system-ui, sans-serif';
+          const tw = ctx.measureText(label).width + 12;
+          const th = 22;
+          const lx = clamp(x, 2, canvas.width - tw - 2);
+          let ly = y - th - 4;
+          if (ly < 2) ly = y + h + 4;
+          if (ly + th > canvas.height - 2) ly = y - th - 4;
+          const box = { x: lx, y: ly, w: tw, h: th };
+          if (!placed.some((p) => hits(p, box))) {
+            placed.push(box);
+            ctx.fillStyle = hexToRgba(color, 0.95);
+            ctx.beginPath();
+            ctx.roundRect(lx, ly, tw, th, 4);
+            ctx.fill();
+            ctx.fillStyle = d.severity === 'fail' ? '#fff' : '#08120f';
+            ctx.fillText(label, lx + 6, ly + th / 2 + 1);
+          }
+        }
+      });
+    const region = local.filter((d) => d.severity !== 'ok');
+    return {
+      label: `D${i + 1}`,
+      dataUrl: canvas.toDataURL('image/jpeg', 0.92),
+      x: r.x, y: r.y, w: cw, h: ch,
+      total: local.length,
+      fails: region.filter((d) => d.severity === 'fail').length,
+      warns: region.filter((d) => d.severity === 'warn').length,
+    };
+  });
 }
 
 function reportMeta() {
@@ -955,9 +1272,12 @@ function buildPdf() {
   });
   const meta = reportMeta();
   state.folio = meta.folio;
+  const details = buildDetailCrops();
   return buildInspectionReport({
     jsPDF,
     imageDataUrl,
+    imageSize: { w: canvas.width, h: canvas.height },
+    details,
     summary,
     detections: state.detections,
     recommendations,
@@ -1133,6 +1453,9 @@ async function openHistory(id) {
   el.btnNewCapture.hidden = !state.stream;
   state.mode = 'capture';
   state.sourceSize = { w: canvas.width, h: canvas.height };
+  setStageAspect(canvas.width, canvas.height);
+  resetView();
+  updateZoomUI();
   state.folio = r.folio;
   state.rawDetections = r.detections || [];
   state.inference = r.inference || { ms: 0, tiles: 1, source: r.source };
@@ -1287,6 +1610,7 @@ function wireEvents() {
     startCamera(el.cameraSelect.value || undefined);
   });
   el.btnValidate.addEventListener('click', validateAgainstGroundTruth);
+  wireZoom();
 
   el.zoomRange.addEventListener('input', () => {
     state.settings.zoom = Number(el.zoomRange.value);
@@ -1422,6 +1746,11 @@ function cacheEls() {
     btnSample2: $('#btnSample2'),
     btnNewCapture: $('#btnNewCapture'),
     btnValidate: $('#btnValidate'),
+    zoomControls: $('#zoomControls'),
+    btnZoomIn: $('#btnZoomIn'),
+    btnZoomOut: $('#btnZoomOut'),
+    btnZoomReset: $('#btnZoomReset'),
+    zoomLevel: $('#zoomLevel'),
     progress: $('#progress'),
     progressBar: $('#progressBar'),
     progressText: $('#progressText'),
